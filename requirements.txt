@@ -1,0 +1,9 @@
+python-dotenv
+requests
+pandas
+yfinance
+pykrx
+lxml
+html5lib
+beautifulsoup4
+anthropic

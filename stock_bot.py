@@ -221,10 +221,20 @@ def get_yf_news(ticker: str, count: int = 5) -> list[str]:
     """yfinance로 US 종목 뉴스 수집. 제목+요약 텍스트 리스트 반환."""
     try:
         news = yf.Ticker(ticker).news or []
-        return [
-            n.get("title", "") + " " + n.get("summary", n.get("description", ""))
-            for n in news[:count]
-        ]
+        texts = []
+        for n in news[:count]:
+            # 신버전: {"id": ..., "content": {"title": ..., "summary": ...}}
+            if "content" in n:
+                c = n["content"]
+                title = c.get("title", "")
+                summary = c.get("summary", c.get("description", ""))
+            # 구버전: {"title": ..., "summary": ...}
+            else:
+                title = n.get("title", "")
+                summary = n.get("summary", n.get("description", ""))
+            if title:
+                texts.append(f"{title} {summary}".strip())
+        return texts
     except Exception:
         return []
 

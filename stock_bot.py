@@ -300,44 +300,77 @@ def fmt_val(val, fmt, suffix="", fallback="N/A") -> str:
     return f"{val:{fmt}}{suffix}" if val is not None else fallback
 
 
+def _w(s: str) -> int:
+    """문자열 표시 너비 (한글 등 2바이트 문자는 2칸)."""
+    return sum(2 if ord(c) > 127 else 1 for c in s)
+
+
+def _pad(s: str, width: int) -> str:
+    """표시 너비 기준으로 오른쪽 공백 패딩."""
+    return s + " " * max(0, width - _w(s))
+
+
 def format_full_message(final_results: list[dict], now_kst: datetime) -> str:
-    """전체 종목을 하나의 메시지로 포맷."""
-    medal = {1: "🥇", 2: "🥈", 3: "🥉"}
-    lines = [
-        f"📊 *[주식 상승여력 분석]* {now_kst.strftime('%Y-%m-%d %H:%M')} KST",
-        f"재무 {int(FINANCIAL_WEIGHT*100)}%  +  뉴스감성 {int(NEWS_WEIGHT*100)}%",
-        "─" * 22,
-    ]
+    """전체 종목을 표 형태 하나의 메시지로 포맷."""
+    header = (
+        f"📊 주식 상승여력 분석  {now_kst.strftime('%Y-%m-%d %H:%M')} KST\n"
+        f"재무 {int(FINANCIAL_WEIGHT*100)}%  +  뉴스감성 {int(NEWS_WEIGHT*100)}%"
+    )
 
+    # 표 헤더
+    col_h = ["#", "종목", "현재가", "종합", "재무", "뉴스", "PER", "PBR"]
+    rows = []
     for i, r in enumerate(final_results, 1):
-        s            = r["stock"]
-        fin          = r["fin_breakdown"]
-        news         = r["news_result"]
-        price        = s.get("current_price")
-        currency     = "원" if s.get("currency") == "KRW" else "$"
-        price_str    = f"{price:,.0f}{currency}" if price else "N/A"
-        per          = s.get("per")
-        pbr          = s.get("pbr")
-        roe          = s.get("roe")
-        news_score   = news.get("score", 50.0)
-        positive     = news.get("positive", "")
-        negative     = news.get("negative", "")
+        s          = r["stock"]
+        fin        = r["fin_breakdown"]
+        news_score = r["news_result"].get("score", 50.0)
+        price      = s.get("current_price")
+        currency   = "원" if s.get("currency") == "KRW" else "$"
+        per        = s.get("per")
+        pbr        = s.get("pbr")
 
-        icon = medal.get(i, "▪️")
-        lines.append(
-            f"{icon} *{i}위. {s['name']}* ({s['ticker']} | {s['market']})\n"
-            f"  현재가 {price_str}  |  *종합 {r['final_score']:.1f}점*\n"
-            f"  재무 {fin['total']:.1f}/100  |  뉴스 {news_score:.0f}/100\n"
-            f"  PER {fmt_val(per, '.1f')}  PBR {fmt_val(pbr, '.2f')}  ROE {fmt_val(roe*100 if roe else None, '.1f', '%')}"
-        )
+        price_str = (f"{price:,.0f}{currency}" if s.get("currency") == "KRW"
+                     else f"${price:,.2f}") if price else "N/A"
+
+        rows.append([
+            str(i),
+            s["name"],
+            price_str,
+            f"{r['final_score']:.1f}",
+            f"{fin['total']:.1f}",
+            f"{news_score:.0f}",
+            f"{per:.1f}" if per else "N/A",
+            f"{pbr:.2f}" if pbr else "N/A",
+        ])
+
+    # 열 너비 계산 (헤더·데이터 중 최대)
+    widths = [max(_w(col_h[j]), max(_w(row[j]) for row in rows)) for j in range(len(col_h))]
+
+    sep  = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
+    def fmt_row(cells):
+        return "|" + "|".join(f" {_pad(c, widths[j])} " for j, c in enumerate(cells)) + "|"
+
+    table_lines = [sep, fmt_row(col_h), sep]
+    for row in rows:
+        table_lines.append(fmt_row(row))
+    table_lines.append(sep)
+
+    # 뉴스 감성 요약
+    news_lines = []
+    for i, r in enumerate(final_results, 1):
+        positive = r["news_result"].get("positive", "")
+        negative = r["news_result"].get("negative", "")
+        s_name   = r["stock"]["name"]
         if positive and positive != "없음":
-            lines.append(f"  ✅ {positive}")
+            news_lines.append(f"{i}.{s_name} ✅ {positive}")
         if negative and negative != "없음":
-            lines.append(f"  ⚠️ {negative}")
-        if i < len(final_results):
-            lines.append("─" * 22)
+            news_lines.append(f"{i}.{s_name} ⚠️ {negative}")
 
-    return "\n".join(lines)
+    table_str = "\n".join(table_lines)
+    msg = f"{header}\n\n```\n{table_str}\n```"
+    if news_lines:
+        msg += "\n\n📰 뉴스 감성\n" + "\n".join(news_lines)
+    return msg
 
 
 # ─── 텔레그램 전송 ────────────────────────────────────────

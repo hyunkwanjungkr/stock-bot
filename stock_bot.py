@@ -133,9 +133,33 @@ WATCH_LIST: list[dict] = [
 
 # ─── yfinance 상세 재무 수집 ──────────────────────────────
 
+def fetch_kr_per_pbr(ticker: str) -> tuple:
+    """pykrx로 한국 종목 PER/PBR 조회. ticker는 yfinance 형식 (예: 005380.KS)."""
+    try:
+        from pykrx import stock as pykrx_stock
+        code = ticker.split(".")[0]
+        for days_back in range(0, 7):
+            date = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
+            try:
+                df = pykrx_stock.get_market_fundamental(date, date, code)
+                if df.empty or code not in df.index:
+                    continue
+                per_val = df.loc[code, "PER"]
+                pbr_val = df.loc[code, "PBR"]
+                per = float(per_val) if per_val and per_val > 0 else None
+                pbr = float(pbr_val) if pbr_val and pbr_val > 0 else None
+                return per, pbr
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None, None
+
+
 def fetch_yf_financials(stock_info: dict) -> dict:
-    """yfinance로 상세 재무 지표 수집. 실패 시 원본 반환."""
+    """yfinance로 상세 재무 지표 수집. 한국 종목은 pykrx로 PER/PBR 보완."""
     ticker = stock_info["ticker"]
+    is_kr = stock_info.get("market") in ("KOSPI", "KOSDAQ")
     try:
         info = yf.Ticker(ticker).info
         result = stock_info.copy()
@@ -147,9 +171,24 @@ def fetch_yf_financials(stock_info: dict) -> dict:
         result["revenue_growth"] = info.get("revenueGrowth")
         result["current_price"]  = info.get("currentPrice") or info.get("regularMarketPrice")
         result["currency"]       = info.get("currency", "KRW")
+
+        # 한국 종목 PER/PBR이 없으면 pykrx로 보완
+        if is_kr and (not result["per"] or not result["pbr"]):
+            kr_per, kr_pbr = fetch_kr_per_pbr(ticker)
+            if not result["per"]:
+                result["per"] = kr_per
+            if not result["pbr"]:
+                result["pbr"] = kr_pbr
+
         return result
     except Exception:
-        return stock_info
+        # yfinance 실패 시 한국 종목은 pykrx로 PER/PBR만이라도 수집
+        result = stock_info.copy()
+        if is_kr:
+            kr_per, kr_pbr = fetch_kr_per_pbr(ticker)
+            result["per"] = kr_per
+            result["pbr"] = kr_pbr
+        return result
 
 
 # ─── 뉴스 수집 ────────────────────────────────────────────

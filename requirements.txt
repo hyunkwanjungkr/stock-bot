@@ -2,4 +2,5 @@ python-dotenv
 requests
 pandas
 yfinance
+pykrx
 anthropic

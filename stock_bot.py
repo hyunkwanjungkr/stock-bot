@@ -118,67 +118,17 @@ def calc_financial_score(metrics: dict) -> tuple[float, dict]:
     return total, breakdown
 
 
-# ─── 종목 목록 수집 ───────────────────────────────────────
+# ─── 분석 대상 종목 (고정) ────────────────────────────────
 
-def get_kr_stock_list() -> list[dict]:
-    """pykrx로 KOSPI + KOSDAQ 전체 종목 수집 (PER/PBR 포함)."""
-    from pykrx import stock as pykrx_stock
-
-    results = []
-    # 최근 영업일 탐색 (주말·공휴일 대비)
-    for days_back in range(0, 7):
-        date = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
-        for market in ["KOSPI", "KOSDAQ"]:
-            try:
-                tickers = pykrx_stock.get_market_ticker_list(date, market=market)
-                if not tickers:
-                    continue
-                df_fund = pykrx_stock.get_market_fundamental(date, date, market)
-                for ticker in tickers:
-                    name = pykrx_stock.get_market_ticker_name(ticker)
-                    yf_ticker = ticker + (".KS" if market == "KOSPI" else ".KQ")
-                    row = {
-                        "ticker": yf_ticker,
-                        "name": name,
-                        "market": market,
-                        "per": None,
-                        "pbr": None,
-                    }
-                    if ticker in df_fund.index:
-                        per_val = df_fund.loc[ticker, "PER"]
-                        pbr_val = df_fund.loc[ticker, "PBR"]
-                        row["per"] = float(per_val) if per_val > 0 else None
-                        row["pbr"] = float(pbr_val) if pbr_val > 0 else None
-                    results.append(row)
-                print(f"  {market}: {len(tickers)}개 ({date})")
-            except Exception as e:
-                print(f"  {market} 수집 실패 ({date}): {e}")
-        if results:
-            break
-
-    print(f"한국 전체 종목: {len(results)}개")
-    return results
-
-
-def get_us_stock_list() -> list[dict]:
-    """S&P 500 전체 종목 목록 수집 (Wikipedia)."""
-    try:
-        df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-        results = [
-            {
-                "ticker": row["Symbol"].replace(".", "-"),
-                "name": row["Security"],
-                "market": "US",
-                "per": None,
-                "pbr": None,
-            }
-            for _, row in df.iterrows()
-        ]
-        print(f"S&P 500: {len(results)}개")
-        return results
-    except Exception as e:
-        print(f"S&P 500 목록 수집 실패: {e}")
-        return []
+WATCH_LIST: list[dict] = [
+    {"ticker": "340570.KQ", "name": "티앤엘",           "market": "KOSDAQ", "per": None, "pbr": None},
+    {"ticker": "005380.KS", "name": "현대차",           "market": "KOSPI",  "per": None, "pbr": None},
+    {"ticker": "GOOGL",     "name": "구글 (Alphabet)",  "market": "NASDAQ", "per": None, "pbr": None},
+    {"ticker": "OPEN",      "name": "오픈도어",         "market": "NASDAQ", "per": None, "pbr": None},
+    {"ticker": "INMD",      "name": "인모드",           "market": "NASDAQ", "per": None, "pbr": None},
+    {"ticker": "033100.KQ", "name": "제룡전기",         "market": "KOSDAQ", "per": None, "pbr": None},
+    {"ticker": "020000.KS", "name": "한섬",             "market": "KOSPI",  "per": None, "pbr": None},
+]
 
 
 # ─── yfinance 상세 재무 수집 ──────────────────────────────
@@ -375,33 +325,22 @@ def main() -> None:
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
     print(f"[{now_kst.strftime('%Y-%m-%d %H:%M')} KST] 주식 상승여력 분석 시작")
 
-    # 1. 전체 종목 목록 수집
-    print("\n=== 1단계: 종목 목록 수집 ===")
-    kr_stocks = get_kr_stock_list()
-    us_stocks = get_us_stock_list()
-    total_count = len(kr_stocks) + len(us_stocks)
-    print(f"전체 분석 대상: {total_count:,}개 (한국 {len(kr_stocks):,} / 미국 {len(us_stocks):,})")
+    # 1. 고정 종목 목록
+    print("\n=== 1단계: 종목 목록 ===")
+    candidates = [s.copy() for s in WATCH_LIST]
+    print(f"분석 대상: {len(candidates)}개")
+    for s in candidates:
+        print(f"  {s['name']} ({s['ticker']}  |  {s['market']})")
 
-    # 2. 한국 종목 1차 필터: pykrx PER+PBR 점수 상위 KR_DETAILED_LIMIT개만 상세 조회
-    kr_candidates = [s for s in kr_stocks if s.get("per") or s.get("pbr")]
-    kr_candidates.sort(
-        key=lambda x: score_per(x.get("per")) + score_pbr(x.get("pbr")),
-        reverse=True,
-    )
-    kr_candidates = kr_candidates[:KR_DETAILED_LIMIT]
-    candidates = kr_candidates + us_stocks
+    # 2. yfinance 상세 재무 수집
     print(f"\n=== 2단계: 재무 상세 수집 ({len(candidates)}개) ===")
-
-    # 3. yfinance 병렬 상세 조회
     detailed: list[dict] = []
     with ThreadPoolExecutor(max_workers=YF_WORKERS) as executor:
         futures = {executor.submit(fetch_yf_financials, s): s for s in candidates}
-        for done_count, future in enumerate(as_completed(futures), 1):
+        for future in as_completed(futures):
             detailed.append(future.result())
-            if done_count % 50 == 0:
-                print(f"  {done_count}/{len(candidates)} 완료")
 
-    # 4. 재무 점수 계산
+    # 3. 재무 점수 계산
     print("\n=== 3단계: 재무 점수 계산 ===")
     scored: list[dict] = []
     for stock in detailed:
@@ -412,26 +351,19 @@ def main() -> None:
             "de_ratio":       stock.get("de_ratio"),
             "revenue_growth": stock.get("revenue_growth"),
         }
-        valid = sum(1 for v in metrics.values() if v is not None)
-        if valid < 2:
-            continue  # 유효 지표 2개 미만은 제외
         fin_score, fin_breakdown = calc_financial_score(metrics)
         stock["fin_score"]     = fin_score
         stock["fin_breakdown"] = fin_breakdown
         scored.append(stock)
 
-    scored.sort(key=lambda x: x["fin_score"], reverse=True)
-    top_for_news = scored[:TOP_FOR_NEWS]
-    print(f"유효 종목: {len(scored)}개 / 뉴스 분석 대상: {len(top_for_news)}개")
-
-    # 5. 뉴스 감성 분석
+    # 4. 뉴스 감성 분석
     print("\n=== 4단계: 뉴스 감성 분석 (Claude) ===")
-    news_results = analyze_news_batch(top_for_news)
+    news_results = analyze_news_batch(scored)
 
-    # 6. 종합 점수 계산 및 정렬
+    # 5. 종합 점수 계산 및 정렬
     print("\n=== 5단계: 최종 순위 계산 ===")
     final_results: list[dict] = []
-    for stock in top_for_news:
+    for stock in scored:
         ticker = stock["ticker"]
         fin_score  = stock["fin_score"]
         news_info  = news_results.get(ticker, {"score": 50.0, "positive": "", "negative": ""})
@@ -445,24 +377,23 @@ def main() -> None:
         })
 
     final_results.sort(key=lambda x: x["final_score"], reverse=True)
-    top_final = final_results[:TOP_FINAL]
 
-    for r in top_final:
+    for r in final_results:
         s = r["stock"]
         print(f"  {s['name']} ({s['ticker']}) | 재무 {r['fin_breakdown']['total']:.1f} | "
               f"뉴스 {r['news_result'].get('score', 50):.0f} | 종합 {r['final_score']:.1f}")
 
-    # 7. 텔레그램 전송
+    # 6. 텔레그램 전송
     print("\n=== 6단계: 텔레그램 전송 ===")
     header = (
         f"📊 *[주식 상승여력 분석]* {now_kst.strftime('%Y-%m-%d %H:%M')} KST\n"
-        f"분석 종목: {total_count:,}개  →  최종 선정: {len(top_final)}개\n"
+        f"분석 종목: {len(final_results)}개\n"
         f"가중치: 재무 {int(FINANCIAL_WEIGHT*100)}%  +  뉴스감성 {int(NEWS_WEIGHT*100)}%\n"
         + "═" * 24
     )
     send_telegram(header)
 
-    for i, r in enumerate(top_final, 1):
+    for i, r in enumerate(final_results, 1):
         msg = format_stock_message(i, r["stock"], r["fin_breakdown"], r["news_result"], r["final_score"])
         send_telegram(msg)
         time.sleep(0.3)

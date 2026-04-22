@@ -294,6 +294,80 @@ def analyze_news_batch(stocks: list[dict]) -> dict[str, dict]:
     return results
 
 
+# ─── 투자 의견 분석 (Claude Sonnet) ──────────────────────
+
+def analyze_investment_opinion(final_results: list[dict]) -> str:
+    """Claude Sonnet으로 각 종목 투자 의견 생성. 전체 결과를 하나의 분석 메시지로 반환."""
+    stocks_block = ""
+    for i, r in enumerate(final_results, 1):
+        s      = r["stock"]
+        fin    = r["fin_breakdown"]
+        news   = r["news_result"]
+        per    = s.get("per")
+        pbr    = s.get("pbr")
+        roe    = s.get("roe")
+        de     = s.get("de_ratio")
+        growth = s.get("revenue_growth")
+        stocks_block += (
+            f"\n[{i}] {s['name']} ({s['ticker']} / {s['market']})\n"
+            f"  종합점수: {r['final_score']:.1f} | 재무: {fin['total']:.1f} | 뉴스감성: {news.get('score', 50):.0f}\n"
+            f"  PER: {f'{per:.1f}' if per else 'N/A'} | PBR: {f'{pbr:.2f}' if pbr else 'N/A'} | "
+            f"ROE: {f'{roe*100:.1f}%' if roe else 'N/A'} | "
+            f"부채비율: {f'{de*100:.0f}%' if de else 'N/A'} | "
+            f"매출성장: {f'{growth*100:+.1f}%' if growth else 'N/A'}\n"
+            f"  뉴스 긍정: {news.get('positive', '없음')} | 뉴스 부정: {news.get('negative', '없음')}\n"
+        )
+
+    prompt = (
+        "당신은 10년 경력의 주식 애널리스트입니다.\n"
+        "아래 종목들의 재무 데이터와 뉴스 감성을 바탕으로 각 종목에 대한 투자 의견을 작성해주세요.\n\n"
+        "각 종목마다 다음 형식으로 출력하세요:\n"
+        "번호|의견(매수/중립/매도)|한줄요약(30자 이내)|근거(60자 이내)\n"
+        "예시: 1|매수|저PER·고ROE 우량주, 저평가 매력|PER 5배 수준으로 동종업계 대비 현저히 저평가\n\n"
+        "다른 설명 없이 형식에 맞게만 출력하세요.\n\n"
+        f"{stocks_block}"
+    )
+
+    try:
+        resp = claude.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        opinion_map = {}
+        for line in resp.content[0].text.strip().splitlines():
+            parts = line.strip().split("|")
+            if len(parts) < 4:
+                continue
+            try:
+                idx = int(parts[0]) - 1
+                if 0 <= idx < len(final_results):
+                    opinion_map[idx] = {
+                        "verdict": parts[1].strip(),
+                        "summary": parts[2].strip(),
+                        "reason":  parts[3].strip(),
+                    }
+            except (ValueError, IndexError):
+                pass
+    except Exception as e:
+        print(f"  투자 의견 생성 실패: {e}")
+        return ""
+
+    verdict_icon = {"매수": "🟢", "중립": "🟡", "매도": "🔴"}
+    lines = ["📋 *애널리스트 투자 의견*\n"]
+    for i, r in enumerate(final_results):
+        op = opinion_map.get(i)
+        if not op:
+            continue
+        icon = verdict_icon.get(op["verdict"], "⚪")
+        lines.append(
+            f"{icon} *{i+1}. {r['stock']['name']}* — {op['verdict']}\n"
+            f"  {op['summary']}\n"
+            f"  _{op['reason']}_"
+        )
+    return "\n\n".join(lines)
+
+
 # ─── 텔레그램 메시지 포맷 ─────────────────────────────────
 
 def fmt_val(val, fmt, suffix="", fallback="N/A") -> str:
@@ -456,10 +530,16 @@ def main() -> None:
         print(f"  {s['name']} ({s['ticker']}) | 재무 {r['fin_breakdown']['total']:.1f} | "
               f"뉴스 {r['news_result'].get('score', 50):.0f} | 종합 {r['final_score']:.1f}")
 
-    # 6. 텔레그램 전송
-    print("\n=== 6단계: 텔레그램 전송 ===")
-    msg = format_full_message(final_results, now_kst)
-    send_telegram(msg)
+    # 6. 투자 의견 생성 (Claude Sonnet)
+    print("\n=== 6단계: 투자 의견 생성 (Claude Sonnet) ===")
+    opinion_msg = analyze_investment_opinion(final_results)
+
+    # 7. 텔레그램 전송
+    print("\n=== 7단계: 텔레그램 전송 ===")
+    send_telegram(format_full_message(final_results, now_kst))
+    if opinion_msg:
+        time.sleep(0.5)
+        send_telegram(opinion_msg)
 
     print("\n완료")
 

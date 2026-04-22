@@ -300,47 +300,42 @@ def fmt_val(val, fmt, suffix="", fallback="N/A") -> str:
     return f"{val:{fmt}}{suffix}" if val is not None else fallback
 
 
-def format_stock_message(rank: int, stock: dict, fin_breakdown: dict, news_result: dict, final_score: float) -> str:
-    name    = stock["name"]
-    ticker  = stock["ticker"]
-    market  = stock["market"]
-    price   = stock.get("current_price")
-    currency = "원" if stock.get("currency") == "KRW" else "$"
-    price_str = f"{price:,.0f}{currency}" if price else "N/A"
-
-    per    = stock.get("per")
-    pbr    = stock.get("pbr")
-    roe    = stock.get("roe")
-    de     = stock.get("de_ratio")
-    growth = stock.get("revenue_growth")
-
-    fin_total  = fin_breakdown["total"]
-    news_score = news_result.get("score", 50.0)
-    fin_contrib  = round(fin_total * FINANCIAL_WEIGHT, 1)
-    news_contrib = round(news_score * NEWS_WEIGHT, 1)
-
+def format_full_message(final_results: list[dict], now_kst: datetime) -> str:
+    """전체 종목을 하나의 메시지로 포맷."""
+    medal = {1: "🥇", 2: "🥈", 3: "🥉"}
     lines = [
-        f"{'🥇' if rank==1 else '🥈' if rank==2 else '🥉' if rank==3 else '📌'} "
-        f"*{rank}위. {name}* ({ticker}  |  {market})",
-        f"현재가: {price_str}  |  *종합점수: {final_score:.1f}점*",
-        f"  ├ 재무({int(FINANCIAL_WEIGHT*100)}%): {fin_total:.1f}/100 → {fin_contrib}점",
-        f"  └ 뉴스감성({int(NEWS_WEIGHT*100)}%): {news_score:.0f}/100 → {news_contrib}점",
-        "",
-        f"📈 *재무 상세* ({fin_total:.1f}/100점)",
-        f"  • PER  {fmt_val(per, '.1f'):<6}  →  {fin_breakdown['per_score']:.1f}/20점",
-        f"  • PBR  {fmt_val(pbr, '.2f'):<6}  →  {fin_breakdown['pbr_score']:.1f}/20점",
-        f"  • ROE  {fmt_val(roe*100 if roe else None, '.1f', '%'):<6}  →  {fin_breakdown['roe_score']:.1f}/20점",
-        f"  • 부채비율  {fmt_val(de*100 if de else None, '.0f', '%'):<6}  →  {fin_breakdown['debt_score']:.1f}/20점",
-        f"  • 매출성장  {fmt_val(growth*100 if growth else None, '+.1f', '%'):<6}  →  {fin_breakdown['growth_score']:.1f}/20점",
-        "",
-        f"📰 *뉴스 감성* ({news_score:.0f}/100점)",
+        f"📊 *[주식 상승여력 분석]* {now_kst.strftime('%Y-%m-%d %H:%M')} KST",
+        f"재무 {int(FINANCIAL_WEIGHT*100)}%  +  뉴스감성 {int(NEWS_WEIGHT*100)}%",
+        "─" * 22,
     ]
-    positive = news_result.get("positive", "")
-    negative = news_result.get("negative", "")
-    if positive and positive != "없음":
-        lines.append(f"  ✅ {positive}")
-    if negative and negative != "없음":
-        lines.append(f"  ⚠️ {negative}")
+
+    for i, r in enumerate(final_results, 1):
+        s            = r["stock"]
+        fin          = r["fin_breakdown"]
+        news         = r["news_result"]
+        price        = s.get("current_price")
+        currency     = "원" if s.get("currency") == "KRW" else "$"
+        price_str    = f"{price:,.0f}{currency}" if price else "N/A"
+        per          = s.get("per")
+        pbr          = s.get("pbr")
+        roe          = s.get("roe")
+        news_score   = news.get("score", 50.0)
+        positive     = news.get("positive", "")
+        negative     = news.get("negative", "")
+
+        icon = medal.get(i, "▪️")
+        lines.append(
+            f"{icon} *{i}위. {s['name']}* ({s['ticker']} | {s['market']})\n"
+            f"  현재가 {price_str}  |  *종합 {r['final_score']:.1f}점*\n"
+            f"  재무 {fin['total']:.1f}/100  |  뉴스 {news_score:.0f}/100\n"
+            f"  PER {fmt_val(per, '.1f')}  PBR {fmt_val(pbr, '.2f')}  ROE {fmt_val(roe*100 if roe else None, '.1f', '%')}"
+        )
+        if positive and positive != "없음":
+            lines.append(f"  ✅ {positive}")
+        if negative and negative != "없음":
+            lines.append(f"  ⚠️ {negative}")
+        if i < len(final_results):
+            lines.append("─" * 22)
 
     return "\n".join(lines)
 
@@ -430,18 +425,8 @@ def main() -> None:
 
     # 6. 텔레그램 전송
     print("\n=== 6단계: 텔레그램 전송 ===")
-    header = (
-        f"📊 *[주식 상승여력 분석]* {now_kst.strftime('%Y-%m-%d %H:%M')} KST\n"
-        f"분석 종목: {len(final_results)}개\n"
-        f"가중치: 재무 {int(FINANCIAL_WEIGHT*100)}%  +  뉴스감성 {int(NEWS_WEIGHT*100)}%\n"
-        + "═" * 24
-    )
-    send_telegram(header)
-
-    for i, r in enumerate(final_results, 1):
-        msg = format_stock_message(i, r["stock"], r["fin_breakdown"], r["news_result"], r["final_score"])
-        send_telegram(msg)
-        time.sleep(0.3)
+    msg = format_full_message(final_results, now_kst)
+    send_telegram(msg)
 
     print("\n완료")
 

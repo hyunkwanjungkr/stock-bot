@@ -39,14 +39,14 @@ KR_DETAILED_LIMIT = 200   # 한국 종목 상세 조회 한도
 # ─── 재무 점수 함수 (각 항목 20점 만점, 합산 100점) ──────────
 
 def score_per(per) -> float:
-    """PER: 낮을수록 유리 (저평가 판단)."""
+    """PER: 낮을수록 유리 (저평가 판단). 만점 25점."""
     if per is None or per <= 0:
         return 0.0
-    if per <= 5:   return 20.0
-    if per <= 10:  return 20.0 - (per - 5) * 1.0
-    if per <= 15:  return 15.0 - (per - 10) * 1.0
-    if per <= 25:  return 10.0 - (per - 15) * 0.5
-    if per <= 50:  return max(0.0, 5.0 - (per - 25) * 0.2)
+    if per <= 5:   return 25.0
+    if per <= 10:  return 25.0 - (per - 5) * 1.25
+    if per <= 15:  return 18.75 - (per - 10) * 1.25
+    if per <= 25:  return 12.5 - (per - 15) * 0.625
+    if per <= 50:  return max(0.0, 6.25 - (per - 25) * 0.25)
     return 0.0
 
 
@@ -62,41 +62,53 @@ def score_pbr(pbr) -> float:
 
 
 def score_roe(roe) -> float:
-    """ROE: 높을수록 자본 효율성 우수. roe는 소수 (0.15 = 15%)."""
+    """ROE: 높을수록 자본 효율성 우수. roe는 소수 (0.15 = 15%). 만점 15점."""
     if roe is None:
         return 0.0
     pct = roe * 100
     if pct < 0:    return 0.0
-    if pct >= 30:  return 20.0
-    if pct >= 20:  return 15.0 + (pct - 20) * 0.5
-    if pct >= 10:  return 10.0 + (pct - 10) * 0.5
-    if pct >= 5:   return 5.0 + (pct - 5) * 1.0
-    return pct * 1.0
+    if pct >= 30:  return 15.0
+    if pct >= 20:  return 11.25 + (pct - 20) * 0.375
+    if pct >= 10:  return 7.5 + (pct - 10) * 0.375
+    if pct >= 5:   return 3.75 + (pct - 5) * 0.75
+    return pct * 0.75
 
 
 def score_debt(de_ratio) -> float:
-    """부채비율(D/E): 낮을수록 재무 안정성 우수."""
+    """부채비율(D/E): 낮을수록 재무 안정성 우수. 만점 15점."""
     if de_ratio is None:
-        return 10.0  # 데이터 없으면 중간값
-    if de_ratio < 0:   return 5.0
-    if de_ratio <= 0.3: return 20.0
-    if de_ratio <= 0.7: return 20.0 - (de_ratio - 0.3) / 0.4 * 5.0
-    if de_ratio <= 1.5: return 15.0 - (de_ratio - 0.7) / 0.8 * 5.0
-    if de_ratio <= 3.0: return 10.0 - (de_ratio - 1.5) / 1.5 * 5.0
-    return max(0.0, 5.0 - (de_ratio - 3.0))
+        return 7.0
+    if de_ratio < 0:    return 3.0
+    if de_ratio <= 0.3: return 15.0
+    if de_ratio <= 0.7: return 15.0 - (de_ratio - 0.3) / 0.4 * 4.0
+    if de_ratio <= 1.5: return 11.0 - (de_ratio - 0.7) / 0.8 * 4.0
+    if de_ratio <= 3.0: return 7.0 - (de_ratio - 1.5) / 1.5 * 4.0
+    return max(0.0, 3.0 - (de_ratio - 3.0))
 
 
 def score_revenue_growth(growth) -> float:
-    """매출성장률: 높을수록 성장성 우수. growth는 소수 (0.15 = 15%)."""
+    """매출성장률: 높을수록 성장성 우수. growth는 소수 (0.15 = 15%). 만점 10점."""
     if growth is None:
-        return 5.0  # 데이터 없으면 낮게
+        return 2.0
     pct = growth * 100
-    if pct >= 30:  return 20.0
-    if pct >= 15:  return 15.0 + (pct - 15) / 15 * 5.0
-    if pct >= 5:   return 10.0 + (pct - 5) / 10 * 5.0
-    if pct >= 0:   return 5.0 + pct / 5 * 5.0
-    if pct >= -10: return max(0.0, 5.0 + pct * 0.5)
+    if pct >= 30:  return 10.0
+    if pct >= 15:  return 7.5 + (pct - 15) / 15 * 2.5
+    if pct >= 5:   return 5.0 + (pct - 5) / 10 * 2.5
+    if pct >= 0:   return 2.5 + pct / 5 * 2.5
+    if pct >= -10: return max(0.0, 2.5 + pct * 0.25)
     return 0.0
+
+
+def score_profit_margin(margin) -> float:
+    """순이익률: 높을수록 실제 남기는 이익 우수. margin은 소수 (0.15 = 15%). 만점 15점."""
+    if margin is None:
+        return 0.0
+    pct = margin * 100
+    if pct < 0:    return 0.0
+    if pct >= 20:  return 15.0
+    if pct >= 10:  return 9.0 + (pct - 10) * 0.6
+    if pct >= 5:   return 5.0 + (pct - 5) * 0.8
+    return pct * 1.0
 
 
 def calc_financial_score(metrics: dict) -> tuple[float, dict]:
@@ -104,13 +116,15 @@ def calc_financial_score(metrics: dict) -> tuple[float, dict]:
     s_per    = score_per(metrics.get("per"))
     s_pbr    = score_pbr(metrics.get("pbr"))
     s_roe    = score_roe(metrics.get("roe"))
+    s_margin = score_profit_margin(metrics.get("profit_margin"))
     s_debt   = score_debt(metrics.get("de_ratio"))
     s_growth = score_revenue_growth(metrics.get("revenue_growth"))
-    total = s_per + s_pbr + s_roe + s_debt + s_growth
+    total = s_per + s_pbr + s_roe + s_margin + s_debt + s_growth
     breakdown = {
         "per_score":    round(s_per, 1),
         "pbr_score":    round(s_pbr, 1),
         "roe_score":    round(s_roe, 1),
+        "margin_score": round(s_margin, 1),
         "debt_score":   round(s_debt, 1),
         "growth_score": round(s_growth, 1),
         "total":        round(total, 1),
@@ -125,9 +139,16 @@ WATCH_LIST: list[dict] = [
     {"ticker": "005380.KS", "name": "현대차",           "market": "KOSPI",  "per": None, "pbr": None},
     {"ticker": "GOOGL",     "name": "구글 (Alphabet)",  "market": "NASDAQ", "per": None, "pbr": None},
     {"ticker": "OPEN",      "name": "오픈도어",         "market": "NASDAQ", "per": None, "pbr": None},
+    {"ticker": "CPNG",      "name": "쿠팡",             "market": "NYSE",   "per": None, "pbr": None},
     {"ticker": "INMD",      "name": "인모드",           "market": "NASDAQ", "per": None, "pbr": None},
     {"ticker": "033100.KQ", "name": "제룡전기",         "market": "KOSDAQ", "per": None, "pbr": None},
     {"ticker": "020000.KS", "name": "한섬",             "market": "KOSPI",  "per": None, "pbr": None},
+    {"ticker": "013520.KS", "name": "화승인더",         "market": "KOSPI",  "per": None, "pbr": None},
+    {"ticker": "009540.KS", "name": "HD한국조선해양",   "market": "KOSPI",  "per": None, "pbr": None},
+    {"ticker": "034220.KS", "name": "LG디스플레이",     "market": "KOSPI",  "per": None, "pbr": None},
+    {"ticker": "042660.KS", "name": "한화오션",         "market": "KOSPI",  "per": None, "pbr": None},
+    {"ticker": "100120.KQ", "name": "뷰웍스",           "market": "KOSDAQ", "per": None, "pbr": None},
+    {"ticker": "329180.KS", "name": "HD현대중공업",     "market": "KOSPI",  "per": None, "pbr": None},
 ]
 
 
@@ -159,12 +180,13 @@ def fetch_yf_financials(stock_info: dict) -> dict:
     try:
         info = yf.Ticker(ticker).info
         result = stock_info.copy()
-        result["per"]            = result.get("per") or info.get("trailingPE")
+        result["per"]            = result.get("per") or info.get("trailingPE") or info.get("forwardPE")
         result["pbr"]            = result.get("pbr") or info.get("priceToBook")
         result["roe"]            = info.get("returnOnEquity")
         de = info.get("debtToEquity")
         result["de_ratio"]       = de / 100 if de is not None else None  # yfinance는 % 단위
         result["revenue_growth"] = info.get("revenueGrowth")
+        result["profit_margin"]  = info.get("profitMargins")
         result["current_price"]  = info.get("currentPrice") or info.get("regularMarketPrice")
         result["currency"]       = info.get("currency", "KRW")
 
@@ -306,6 +328,7 @@ def analyze_investment_opinion(final_results: list[dict]) -> str:
         per    = s.get("per")
         pbr    = s.get("pbr")
         roe    = s.get("roe")
+        margin = s.get("profit_margin")
         de     = s.get("de_ratio")
         growth = s.get("revenue_growth")
         stocks_block += (
@@ -313,6 +336,7 @@ def analyze_investment_opinion(final_results: list[dict]) -> str:
             f"  종합점수: {r['final_score']:.1f} | 재무: {fin['total']:.1f} | 뉴스감성: {news.get('score', 50):.0f}\n"
             f"  PER: {f'{per:.1f}' if per else 'N/A'} | PBR: {f'{pbr:.2f}' if pbr else 'N/A'} | "
             f"ROE: {f'{roe*100:.1f}%' if roe else 'N/A'} | "
+            f"순이익률: {f'{margin*100:.1f}%' if margin else 'N/A'} | "
             f"부채비율: {f'{de*100:.0f}%' if de else 'N/A'} | "
             f"매출성장: {f'{growth*100:+.1f}%' if growth else 'N/A'}\n"
             f"  뉴스 긍정: {news.get('positive', '없음')} | 뉴스 부정: {news.get('negative', '없음')}\n"
@@ -392,18 +416,21 @@ def format_full_message(final_results: list[dict], now_kst: datetime) -> str:
     )
 
     # 표 헤더
-    col_h = ["#", "종목", "현재가", "종합", "재무", "뉴스", "PER", "PBR"]
+    col_h = ["#", "종목", "현재가", "종합", "재무", "뉴스", "PER", "PBR", "ROE", "순이익률", "부채비율", "매출성장"]
     rows = []
     for i, r in enumerate(final_results, 1):
         s          = r["stock"]
         fin        = r["fin_breakdown"]
         news_score = r["news_result"].get("score", 50.0)
         price      = s.get("current_price")
-        currency   = "원" if s.get("currency") == "KRW" else "$"
         per        = s.get("per")
         pbr        = s.get("pbr")
+        roe        = s.get("roe")
+        margin     = s.get("profit_margin")
+        de         = s.get("de_ratio")
+        growth     = s.get("revenue_growth")
 
-        price_str = (f"{price:,.0f}{currency}" if s.get("currency") == "KRW"
+        price_str = (f"{price:,.0f}원" if s.get("currency") == "KRW"
                      else f"${price:,.2f}") if price else "N/A"
 
         rows.append([
@@ -415,6 +442,10 @@ def format_full_message(final_results: list[dict], now_kst: datetime) -> str:
             f"{news_score:.0f}",
             f"{per:.1f}" if per else "N/A",
             f"{pbr:.2f}" if pbr else "N/A",
+            f"{roe*100:.1f}%" if roe else "N/A",
+            f"{margin*100:.1f}%" if margin else "N/A",
+            f"{de*100:.0f}%" if de else "N/A",
+            f"{growth*100:+.1f}%" if growth else "N/A",
         ])
 
     # 열 너비 계산 (헤더·데이터 중 최대)
@@ -495,6 +526,7 @@ def main() -> None:
             "per":            stock.get("per"),
             "pbr":            stock.get("pbr"),
             "roe":            stock.get("roe"),
+            "profit_margin":  stock.get("profit_margin"),
             "de_ratio":       stock.get("de_ratio"),
             "revenue_growth": stock.get("revenue_growth"),
         }
